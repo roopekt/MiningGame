@@ -1,0 +1,313 @@
+#include "VoxelData.cginc"
+#include "TriangulationTable.cginc"
+#include "Perlin.cginc"
+
+//width and size of NoiseMap
+#define CHUNKWIDTH 16
+#define CHUNKSIZE uint3(CHUNKWIDTH, CHUNKWIDTH, CHUNKWIDTH)
+
+#define NULLINDEX 0xFFFFFFFF
+
+//unifomrs
+#if 1
+float u_cellWidth;//width of one cube cell
+float3 u_position;
+
+float u_noise2D_totalAmplitude;
+float u_noise2D_majorWavelength;
+float u_noise2D_persistence;
+uint u_noise2D_layerCount;
+int u_noise2D_seed;
+
+float u_noise3D_totalAmplitude;
+float u_noise3D_majorWavelength;
+float u_noise3D_persistence;
+uint u_noise3D_layerCount;
+int u_noise3D_seed;
+
+float u_grassTresh;
+
+//for terraforming
+//float3 u_terraform_spherePos;//relative to chunk's position
+//float u_terraform_sphereRadius;
+//float u_terraform_delta;//negative for mining, positive for placing
+#endif
+
+//buffers
+RWTexture2D<float> NoiseMap2D;
+RWStructuredBuffer<float> NoiseMap3D;
+RWStructuredBuffer<float4> VertexMap;//w component is 1 when vertex is used in mesh (otherwise 0) 
+RWStructuredBuffer<uint> IndexMap;
+RWStructuredBuffer<uint> GroundTypeMap;
+
+#pragma kernel Gen2DNoise
+#pragma kernel Gen3DNoise
+#pragma kernel PlaceVertices
+#pragma kernel Triangulate
+#pragma kernel GenGroundTypes
+
+
+
+uint To1DIndex(uint3 index3D, uint3 gridSize) {
+	return (gridSize.x * gridSize.y) * index3D.z +
+		gridSize.x * index3D.y +
+		index3D.x;
+}
+
+uint3 To3DIndex(uint index1D, const uint3 gridSize)//this have to be inverse of To1DIndex
+{
+	uint3 index3D;
+	const uint xy = gridSize.x * gridSize.y;
+	index3D.z = index1D / xy;
+
+	index1D -= index3D.z * xy;
+	index3D.y = index1D / gridSize.x;
+
+	index3D.x = index1D - index3D.y * gridSize.x;
+	return index3D;
+}
+
+uint VertexMapIndex(uint3 cellId, uint edgeIndex, const uint3 noiseMapSize)
+{
+	if (edgeIndex == 255)
+		return NULLINDEX;
+
+	uint3 pos = 2 * cellId + voxelEdgeOfsets[edgeIndex];
+	const uint3 gridSize = noiseMapSize * 2 - uint3(1, 1, 1);
+	uint index = To1DIndex(pos, gridSize) >> 1;
+	return index;
+}
+
+uint3 VertexMapIndexToPos(uint vertexMapIndex, const uint3 noiseMapSize)//return value doubled (to fit in ints)
+{
+	const uint3 gridSize = noiseMapSize * 2 - uint3(1, 1, 1);
+	return To3DIndex((vertexMapIndex << 1) + 1, gridSize);
+}
+
+float NoiseMap3DGetSafely(int3 pos)
+{
+	pos = clamp(pos, int3(0, 0, 0), CHUNKSIZE - int3(1, 1, 1));
+	return NoiseMap3D[To1DIndex(pos, CHUNKSIZE)];
+}
+
+float3 Noise3DNumericDerivative(uint3 pos)
+{
+	////corner noise values
+	//float c000 = NoiseMap3D[To1DIndex(pos + uint3(0, 0, 0), CHUNKSIZE)];
+	//float c001 = NoiseMap3D[To1DIndex(pos + uint3(0, 0, 1), CHUNKSIZE)];
+	//float c010 = NoiseMap3D[To1DIndex(pos + uint3(0, 1, 0), CHUNKSIZE)];
+	//float c011 = NoiseMap3D[To1DIndex(pos + uint3(0, 1, 1), CHUNKSIZE)];
+	//float c100 = NoiseMap3D[To1DIndex(pos + uint3(1, 0, 0), CHUNKSIZE)];
+	//float c101 = NoiseMap3D[To1DIndex(pos + uint3(1, 0, 1), CHUNKSIZE)];
+	//float c110 = NoiseMap3D[To1DIndex(pos + uint3(1, 1, 0), CHUNKSIZE)];
+	//float c111 = NoiseMap3D[To1DIndex(pos + uint3(1, 1, 1), CHUNKSIZE)];
+
+	//float3 d;
+	//d.x = (c100 + c101 + c110 + c111) - (c000 + c001 + c010 + c011);//'average of right' - 'average of left' * 4.0
+	//d.y = (c010 + c011 + c110 + c111) - (c000 + c001 + c100 + c101);//'average of top' - 'average of bottom' * 4.0
+	//d.z = (c001 + c011 + c101 + c111) - (c000 + c010 + c100 + c110);
+	//d *= 0.25;//remove factor of 4 to get actual averages
+
+	//return d;
+
+	int3 posInt = (int3)pos;
+
+	float3 d;
+	d.x = NoiseMap3DGetSafely(posInt + int3(1, 0, 0)) - NoiseMap3DGetSafely(posInt + int3(-1, 0, 0));
+	d.y = NoiseMap3DGetSafely(posInt + int3(0, 1, 0)) - NoiseMap3DGetSafely(posInt + int3(0, -1, 0));
+	d.z = NoiseMap3DGetSafely(posInt + int3(0, 0, 1)) - NoiseMap3DGetSafely(posInt + int3(0, 0, -1));
+	d *= 0.5;
+
+	return d;
+}
+
+bool IsCellFullySolid(int3 cellIndex)
+{
+	return
+		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 0, 0), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 0, 1), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 1, 0), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 1, 1), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 0, 0), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 0, 1), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 1, 0), CHUNKSIZE)] > 0 &&
+		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 1, 1), CHUNKSIZE)] > 0;
+}
+
+//bool IsCellFullyAir(uint3 cellIndex)
+//{
+//	return
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 0, 0), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 0, 1), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 1, 0), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(0, 1, 1), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 0, 0), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 0, 1), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 1, 0), CHUNKSIZE)] < 0 &&
+//		NoiseMap3D[To1DIndex(cellIndex + uint3(1, 1, 1), CHUNKSIZE)] < 0;
+//}
+
+[numthreads(8, 8, 1)]
+void Gen2DNoise(uint3 threadId : SV_DispatchThreadID)
+{
+	//if threadId is too big
+	//if (threadId.x >= CHUNKWIDTH || threadId.y >= CHUNKWIDTH)
+	//	return;
+
+	float2 boundaryOfset = float2(u_cellWidth, u_cellWidth);
+	float2 pos = u_cellWidth * float2(threadId.xy) - boundaryOfset + u_position.xz;
+
+	NoiseMap2D[threadId.xy] = LayeredPerlin2D(pos, u_noise2D_layerCount, 1.0 / u_noise2D_majorWavelength, u_noise2D_persistence, u_noise2D_seed)* u_noise2D_totalAmplitude;
+}
+
+[numthreads(4, 4, 4)]
+void Gen3DNoise(uint3 threadId : SV_DispatchThreadID)
+{	
+	//if threadId is too big
+	//if (threadId.x >= CHUNKWIDTH || threadId.y >= CHUNKWIDTH || threadId.z >= CHUNKWIDTH)
+	//	return;
+	
+	//caves
+	//float noise1 = 1 - abs(Perlin3D(.04 * worldPos, 11));
+	//float noise2 = 1 - abs(Perlin3D(.04 * worldPos, 69));
+	//float noise = noise1 * noise2;
+	//noise - .1
+
+	float3 boundaryOfset = float3(u_cellWidth, u_cellWidth, u_cellWidth);
+	float3 worldPos = u_cellWidth * (float3)threadId - boundaryOfset + u_position;
+
+	float noise2D = NoiseMap2D[threadId.xz] - worldPos.y;
+	float noise3D = LayeredPerlin3D(worldPos, u_noise3D_layerCount, 1.0 / u_noise3D_majorWavelength, u_noise3D_persistence, u_noise3D_seed) * u_noise3D_totalAmplitude;
+
+	float totalNoise = clamp(noise2D + noise3D, -1.0, 1.0);
+
+	//totalNoise = (((threadId.x ^ threadId.y ^ threadId.z) + 1) % 3 == 0) ? -.5 : .5;
+
+	NoiseMap3D[To1DIndex(threadId, CHUNKSIZE)] = totalNoise;
+}
+
+[numthreads(64, 1, 1)]
+void PlaceVertices(uint3 threadId : SV_DispatchThreadID)
+{	
+	//if threadId is too big
+	const uint w = 2 * CHUNKWIDTH - 1;
+	if (threadId.x >= w * w * w / 2)
+		return;
+
+	uint3 edgePosDoubled = VertexMapIndexToPos(threadId.x, CHUNKSIZE);
+	
+	uint3 cornerAi = edgePosDoubled >> 1;
+	uint3 cornerBi = cornerAi;
+
+	//calc cornerB based on which axis this edge is parallel to
+	if (edgePosDoubled.x & 1)//if x is odd
+		cornerBi += uint3(1, 0, 0);
+	if (edgePosDoubled.y & 1)
+		cornerBi += uint3(0, 1, 0);
+	if (edgePosDoubled.z & 1)
+		cornerBi += uint3(0, 0, 1);
+
+	bool allOdd = (edgePosDoubled.x & 1) && (edgePosDoubled.y & 1) && (edgePosDoubled.z & 1);
+
+	float3 cornerAf = (float3)cornerAi;
+	float3 cornerBf = (float3)cornerBi;
+
+	//noise values at cornerA and cornerB
+	float noiseA = NoiseMap3D[To1DIndex(cornerAi, CHUNKSIZE)];
+	float noiseB = NoiseMap3D[To1DIndex(cornerBi, CHUNKSIZE)];
+
+	//compute vertex. simplest when B is bigger in coords and noise. then A is negative and B positive
+	float noiseDiff = noiseB - noiseA;
+	float3 ToB = cornerBf - cornerAf;
+	float toZero = -noiseA;//0 - noiseA
+	float3 vertex = cornerAf + (toZero / noiseDiff) * ToB;//lerp
+
+	//is on boundary?
+	uint3 max = uint3(1, 1, 1) * ((CHUNKWIDTH - 1) * 2 - 2);
+	bool isOnBoundary = any(edgePosDoubled < uint3(2, 2, 2)) || any(edgePosDoubled > max);
+
+	vertex -= float3(1, 1, 1);//subtract boundary
+
+	bool vertexUsed = ((0 < noiseA) != (0 < noiseB)) &&//exactly one of the two vertices must be solid
+		!allOdd &&//vertices at center of a cube aren't used
+		!isOnBoundary;//cut out boundaries
+
+	VertexMap[threadId.x] = float4(vertex * u_cellWidth, (float)vertexUsed);
+}
+	
+[numthreads(4, 4, 4)]
+void Triangulate(uint3 threadId : SV_DispatchThreadID)
+{	
+	//if threadId is too big
+	if (threadId.x >= CHUNKWIDTH - 1 || threadId.y >= CHUNKWIDTH - 1 || threadId.z >= CHUNKWIDTH - 1)
+		return;
+
+	//compute index for traingulation table
+	uint tableIndex = 0;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[0], CHUNKSIZE) ]) * 1;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[1], CHUNKSIZE) ]) * 2;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[2], CHUNKSIZE) ]) * 4;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[3], CHUNKSIZE) ]) * 8;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[4], CHUNKSIZE) ]) * 16;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[5], CHUNKSIZE) ]) * 32;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[6], CHUNKSIZE) ]) * 64;
+	tableIndex |= (0 < NoiseMap3D[ To1DIndex(threadId + voxelCorners[7], CHUNKSIZE) ]) * 128;
+
+	//cut out boundaries
+	bool isOnBoundary = any(threadId < 1) || any(threadId >= CHUNKWIDTH - 2);
+	if (isOnBoundary)
+		tableIndex = 0;
+
+	//compute indeces
+	uint indexMapIndex = (3 * 5) * To1DIndex(threadId, CHUNKSIZE - uint3(1,1,1));
+	uint triang[3 * 5] = TriangulationTable[tableIndex];
+
+	//write indeces to indexMap
+	IndexMap[indexMapIndex + 0] = VertexMapIndex(threadId, triang[0], CHUNKSIZE);
+	IndexMap[indexMapIndex + 1] = VertexMapIndex(threadId, triang[1], CHUNKSIZE);
+	IndexMap[indexMapIndex + 2] = VertexMapIndex(threadId, triang[2], CHUNKSIZE);
+	IndexMap[indexMapIndex + 3] = VertexMapIndex(threadId, triang[3], CHUNKSIZE);
+	IndexMap[indexMapIndex + 4] = VertexMapIndex(threadId, triang[4], CHUNKSIZE);
+	IndexMap[indexMapIndex + 5] = VertexMapIndex(threadId, triang[5], CHUNKSIZE);
+	IndexMap[indexMapIndex + 6] = VertexMapIndex(threadId, triang[6], CHUNKSIZE);
+	IndexMap[indexMapIndex + 7] = VertexMapIndex(threadId, triang[7], CHUNKSIZE);
+	IndexMap[indexMapIndex + 8] = VertexMapIndex(threadId, triang[8], CHUNKSIZE);
+	IndexMap[indexMapIndex + 9] = VertexMapIndex(threadId, triang[9], CHUNKSIZE);
+	IndexMap[indexMapIndex + 10] = VertexMapIndex(threadId, triang[10], CHUNKSIZE);
+	IndexMap[indexMapIndex + 11] = VertexMapIndex(threadId, triang[11], CHUNKSIZE);
+	IndexMap[indexMapIndex + 12] = VertexMapIndex(threadId, triang[12], CHUNKSIZE);
+	IndexMap[indexMapIndex + 13] = VertexMapIndex(threadId, triang[13], CHUNKSIZE);
+	IndexMap[indexMapIndex + 14] = VertexMapIndex(threadId, triang[14], CHUNKSIZE);
+}
+
+[numthreads(4, 4, 4)]
+void GenGroundTypes(uint3 threadId : SV_DispatchThreadID)
+{
+	//if threadId is too big, return
+	if (threadId.x >= CHUNKWIDTH || threadId.y >= CHUNKWIDTH || threadId.z >= CHUNKWIDTH)
+		return;
+
+	float3 normal = normalize(Noise3DNumericDerivative(threadId));
+	float normalDot = dot(normal, float3(0, 1, 0));
+
+	//bool aboveSolid = IsCellFullySolid(threadId + uint3(0, 1, 0));
+	bool aboveSolid = NoiseMap3D[To1DIndex(threadId + uint3(0, 1, 0), CHUNKSIZE)] > 0;
+	bool isGrass = normalDot < u_grassTresh && !aboveSolid;
+
+	//isGrass = (threadId.x ^ threadId.y ^ threadId.z) % 2 == 0;
+
+	GroundTypeMap[To1DIndex(threadId, CHUNKSIZE)] = (uint)isGrass;
+}
+
+//[numthreads(4, 4, 4)]
+//void AddSphere(uint3 threadId : SV_DispatchThreadID)
+//{
+//	float3 diff = u_terraform_spherePos - (float3)threadId * u_cellWidth;
+//	float sqrDist = dot(diff, diff);
+//
+//	float delta = 1 - (sqrDist / (u_terraform_sphereRadius * u_terraform_sphereRadius));
+//	delta = max(0, delta);
+//
+//	float original = NoiseMap3D[To1DIndex(threadId, CHUNKSIZE)];
+//	NoiseMap3D[To1DIndex(threadId, CHUNKSIZE)] = original + delta * u_terraform_delta;
+//}
