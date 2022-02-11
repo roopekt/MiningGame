@@ -32,13 +32,4 @@ public class GameManager : MonoBehaviour
 
     void OnDisable() =>
         instance = null;
-
-    void Update()
-    {
-        //quit application if esc pressed
-        if (Input.GetKey(KeyCode.Escape))
-        {
-            Application.Quit();
-        }
-    }
 }
