@@ -43,7 +43,7 @@ public class PlayerMiner : MonoBehaviour
         //reset MiningLoot
         miningLoot.Clear();
     }
-    void Update()//SHOULD BE FIXEDUPDATE
+    void FixedUpdate()
     {
         lootDropTimer -= Time.fixedDeltaTime;
         if (lootDropTimer < 0f)
@@ -89,13 +89,10 @@ public class PlayerMiner : MonoBehaviour
                 return;
 
             float delta = 0f;
-            if (Input.GetMouseButtonDown(0))
+            if (Input.GetMouseButton(0))
                 delta -= Strength * Time.fixedDeltaTime;
-            if (Input.GetMouseButtonDown(1))
+            if (Input.GetMouseButton(1))
                 delta += Strength * Time.fixedDeltaTime;
-
-            //temp
-            delta /= Time.fixedDeltaTime;
 
             //if no mining or placing
             if (Mathf.Approximately(delta, 0f))
@@ -115,15 +112,15 @@ public class PlayerMiner : MonoBehaviour
                         //place a sphere
                         float totalDelta = ChunkLoader.PlaceSphere(hitPos, SphereRadius, delta, handSlot.itemTypeId);
 
-                        //figure out how much to take from hand
-                        if (latestTypeTaken != handSlot.itemTypeId)
-                            extraAmountTaken = 0f;//reset
-                        float amountPlaced = totalDelta * GameManager.instance.GroundItemDensity;
-                        int amountTaken = Mathf.CeilToInt(amountPlaced - extraAmountTaken);
-                        extraAmountTaken = (float)amountTaken - amountPlaced;
-                        latestTypeTaken = handSlot.itemTypeId;
+                        ////figure out how much to take from hand
+                        //if (latestTypeTaken != handSlot.itemTypeId)
+                        //    extraAmountTaken = 0f;//reset
+                        //float amountPlaced = totalDelta * GameManager.instance.GroundItemDensity;
+                        //int amountTaken = Mathf.CeilToInt(amountPlaced - extraAmountTaken);
+                        //extraAmountTaken = (float)amountTaken - amountPlaced;
+                        //latestTypeTaken = handSlot.itemTypeId;
 
-                        handSlot.Subtract((uint)amountTaken);
+                        //handSlot.Subtract((uint)amountTaken);
                     }
                 }
                 else//if mining
