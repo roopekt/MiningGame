@@ -17,6 +17,9 @@ Infinite modifiable terrain implemented with marching cubes. Includes an invento
 
 ## Controls 
 
+### General 
+- Press esc to close the game
+
 ### Moving 
 - Turn camera by dragging with mouse
 - Move with WASD keys
