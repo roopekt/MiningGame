@@ -7,17 +7,26 @@ namespace Item
     {
         [SerializeField] public ItemType[] itemTypes;
 
-        public static ItemTypeHandler instance { get; private set; }
+        public static ItemTypeHandler instance { get => GetInstance(); }
 
-        void OnEnable()
+        private static ItemTypeHandler _instance;
+
+        private static ItemTypeHandler GetInstance()
         {
-            if (instance != null)
-                Debug.LogError("can't have multiple instances of ItemTypeHandler");
+            if (_instance == null)
+                _instance = LoadInstanceFromResources();
 
-            instance = this;
+            return _instance;
         }
 
-        void OnDestroy() =>
-            instance = null;
+        private static ItemTypeHandler LoadInstanceFromResources()
+        {
+            ItemTypeHandler instance = Resources.Load<ItemTypeHandler>(nameof(ItemTypeHandler));
+
+            if (instance == null)
+                throw new System.Exception("Could not find a ItemTypeHandler");
+
+            return instance;
+        }
     }
 }
