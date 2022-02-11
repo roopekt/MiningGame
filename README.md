@@ -6,6 +6,8 @@ Infinite modifiable terrain implemented with marching cubes. Includes an invento
 
 ## Installation 
 
+If you only need the binaries, you can get them [here](https://github.com/roopekt/MiningGame/releases). Otherwise:
+
  1. Clone the repository
 	```shell
 	git clone https://github.com/roopekt/MiningGame.git
