@@ -1,6 +1,8 @@
 # MiningGame 
 
 Infinite modifiable terrain implemented with marching cubes. Includes an inventory system and has two types of ground (grass & stone).
+<br/><br/>
+![a house](https://github.com/roopekt/MiningGame/blob/main/ReadmeData/house.png)
 
 ## Installation 
 
@@ -56,3 +58,6 @@ Infinite modifiable terrain implemented with marching cubes. Includes an invento
 ## License 
 
 This project is distributed under the MIT License. See `LICENSE.txt` for more information.
+
+<br/><br/>
+![inventory and a item on the ground](https://github.com/roopekt/MiningGame/blob/main/ReadmeData/inventory.png)
