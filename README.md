@@ -53,9 +53,9 @@ If you only need the binaries, you can get them [here](https://github.com/roopek
 
 ### Inventory
 - The is a Slot class that has all the logic for moving items between slots.
-- Anything that can hold items uses th Slot class: inventory, cursor in the inventory and items on the ground.
-- There is a SlotGUI class that all the GUI that is the same across the game. This listens to a event in the Slot class to update.
-- There is a ItemType class that descripes all the properties of a item, and a ItemTypeHandler which is a singleton scriptable object containg all the item types.
+- Anything that can hold items uses the Slot class: inventory, items on the ground and the cursor in the inventory.
+- There is a SlotGUI class that all the specialized item GUIs use. This listens to an event in the Slot class to rerender.
+- There is an ItemType class that descripes all the properties of an item, and an ItemTypeHandler which is a singleton scriptable object containg all the item types.
 
 ## License 
 
