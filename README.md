@@ -34,13 +34,16 @@ If you only need the binaries, you can get them [here](https://github.com/roopek
 - Hold the right mouse button to place from your hand (highlighted slot in your hotbar)
 
 ### Inventory and items
-- Pick up items by walking onto them
 - Change your hand slot using the scroll wheel
-- Open or close the inventory by pressing E
+- Drop one item from your hand by pressing Q
+- Drop all items from your hand by pressing Control+Q
+- Pick up items by walking onto them
+- Open or close the inventory mode by pressing E
+#### Inventory mode 
 - Pick up a stack by left clicking while your cursor is empty
-- Drop a stack by left clicking a slot
+- Put down a stack by left clicking a slot
 - Pick up half of a stack by right clicking while your cursor is empty
-- Drop one item by right clicking
+- Put down one item by right clicking
 
 ## How it works 
 
